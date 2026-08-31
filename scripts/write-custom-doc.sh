@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 通用飞书文档写入：把 markdown 正文 + 本地图片目录写成一份带图的飞书云文档。
-# 复用 lib/feishu-api.sh 的原子能力（不重写 API）。
+# 复用 scripts/feishu-api.sh 的原子能力（不重写 API）。
 #
-# Usage: write-custom-doc.sh <doc_title> <content_md_file> <image_dir>
+# Usage: ./scripts/write-custom-doc.sh --title TITLE --content CONTENT_MD_FILE [--image-dir IMAGE_DIR]
 #   - content_md_file: markdown 正文，用 ## / ### / #### 标题、[text](url) 链接、
 #                      以及形如 [[图片名]] 的占位符（图片名 = 图片文件去扩展名，如 gsc-01）
 #   - image_dir: 图片目录，脚本扫描 *.webp / *.png（跳过 _ 开头的分隔图），
@@ -13,21 +13,52 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/lib/feishu-api.sh"
+SKILL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# 租户专属域名，例如 your-tenant.feishu.cn。
-FEISHU_DOC_DOMAIN="${FEISHU_DOC_DOMAIN:?Set FEISHU_DOC_DOMAIN to your tenant document domain}"
+usage() {
+  echo "usage: $0 --title TITLE --content CONTENT_MD_FILE [--image-dir IMAGE_DIR]" >&2
+}
 
-TITLE="${1:-}"
-CONTENT_FILE="${2:-}"
-IMAGE_DIR="${3:-}"
+fail_usage() {
+  echo "ERROR: $*" >&2
+  usage
+  exit 2
+}
+
+TITLE=""
+CONTENT_FILE=""
+IMAGE_DIR=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --title)
+      [ "$#" -ge 2 ] || fail_usage "--title requires a value"
+      TITLE="$2"
+      shift 2
+      ;;
+    --content)
+      [ "$#" -ge 2 ] || fail_usage "--content requires a value"
+      CONTENT_FILE="$2"
+      shift 2
+      ;;
+    --image-dir)
+      [ "$#" -ge 2 ] || fail_usage "--image-dir requires a value"
+      IMAGE_DIR="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      fail_usage "unknown argument: $1"
+      ;;
+  esac
+done
 
 log() { echo "[write-custom-doc] $*" >&2; }
 
-if [ -z "$TITLE" ] || [ -z "$CONTENT_FILE" ]; then
-  echo "usage: $0 <doc_title> <content_md_file> [image_dir]" >&2
-  exit 1
-fi
+[ -n "$TITLE" ] || fail_usage "--title is required"
+[ -n "$CONTENT_FILE" ] || fail_usage "--content is required"
 # image_dir 为空时（纯文本文档，如 audit/复盘/miner 无图场景）用临时空目录，避免报 usage
 _CLEANUP_IMGDIR=false
 if [ -z "$IMAGE_DIR" ]; then
@@ -42,6 +73,12 @@ if [ ! -d "$IMAGE_DIR" ]; then
   echo "image_dir not found: $IMAGE_DIR" >&2
   exit 1
 fi
+
+[ -f "${SKILL_DIR}/.env" ] && { set -a; source "${SKILL_DIR}/.env"; set +a; }
+source "${SCRIPT_DIR}/feishu-api.sh"
+
+# 租户专属域名，例如 your-tenant.feishu.cn。
+FEISHU_DOC_DOMAIN="${FEISHU_DOC_DOMAIN:?Set FEISHU_DOC_DOMAIN to your tenant document domain}"
 
 # ========== 拿 token + 创建文档 ==========
 token=$(get_feishu_token) || { echo "FAIL: get_feishu_token" >&2; exit 1; }

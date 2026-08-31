@@ -502,6 +502,77 @@ create_table_with_data() {
   echo "$table_id"
 }
 
+feishu_get_token() {
+  get_feishu_token "$@"
+}
+
+feishu_create_document() {
+  create_document "$@"
+}
+
+feishu_ensure_public_access() {
+  ensure_document_public_access "$@"
+}
+
+feishu_get_root_block() {
+  get_page_id "$@"
+}
+
+# 创建一个飞书原生表格，只返回 table block_id，不写入内容。
+# 参数: token, doc_token, parent_block_id, row_count, column_count, col_widths_json_array
+feishu_create_table() {
+  local token="$1" doc_token="$2" parent_block_id="$3" row_count="$4" column_count="$5" col_widths_json="${6:-}"
+  local response code msg table_id
+
+  if [ -z "${col_widths_json}" ]; then
+    col_widths_json="$(jq -nc --argjson cols "${column_count}" '[range(0; $cols) | 200]')"
+  fi
+
+  response="$(curl -sS --connect-timeout 10 --max-time 30 -X POST "https://open.feishu.cn/open-apis/docx/v1/documents/${doc_token}/blocks/${parent_block_id}/children" \
+    -H "Authorization: Bearer ${token}" \
+    -H "Content-Type: application/json" \
+    -d "$(jq -nc --argjson r "${row_count}" --argjson c "${column_count}" --argjson w "${col_widths_json}" '{
+      children: [{block_type:31, table:{property:{row_size:$r, column_size:$c, column_width:$w}}}],
+      index: -1
+    }')" 2>/dev/null || true)"
+
+  code="$(echo "${response}" | jq -r '.code // 1' 2>/dev/null || echo 1)"
+  msg="$(echo "${response}" | jq -r '.msg // ""' 2>/dev/null || echo "")"
+  if [ "${code}" != "0" ]; then
+    log "ERROR: create table failed: code=${code} msg=${msg}"
+    return 1
+  fi
+
+  table_id="$(echo "${response}" | jq -r '.data.children[0].block_id // empty' 2>/dev/null || true)"
+  if [ -z "${table_id}" ]; then
+    log "ERROR: create table failed: empty table_id"
+    return 1
+  fi
+  echo "${table_id}"
+}
+
+# 读取指定 block 的直接 children；表格 block 会返回 table.cells。
+# 参数: token, doc_token, block_id
+feishu_list_block_children() {
+  local token="$1" doc_token="$2" block_id="$3"
+  local response code msg
+
+  response="$(curl -sS --connect-timeout 10 --max-time 30 "https://open.feishu.cn/open-apis/docx/v1/documents/${doc_token}/blocks/${block_id}" \
+    -H "Authorization: Bearer ${token}" 2>/dev/null || true)"
+  code="$(echo "${response}" | jq -r '.code // 1' 2>/dev/null || echo 1)"
+  msg="$(echo "${response}" | jq -r '.msg // ""' 2>/dev/null || echo "")"
+  if [ "${code}" != "0" ]; then
+    log "ERROR: get block failed: block=${block_id} code=${code} msg=${msg}"
+    return 1
+  fi
+
+  echo "${response}" | jq -c '.data.block.table.cells // .data.block.children // []'
+}
+
+feishu_write_table_cell() {
+  _feishu_write_table_cell "$@"
+}
+
 append_content() {
   local token="$1"
   local doc_token="$2"

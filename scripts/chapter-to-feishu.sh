@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 单节生财课程内容 JSON → 飞书文档（全自动：解析 block + 下载图片 + 写飞书文档）
-# Usage: chapter-to-feishu.sh <chapter.json>
+# Usage: ./scripts/chapter-to-feishu.sh <chapter.json>
 #   chapter.json: getChapterContent API 返回的 data.chapter（含 title/id/content）
 #
 # 产物: 在 <chapter.json> 同级建 <id>/ 目录，内含 正文.md + img/，并生成一份飞书文档
@@ -9,7 +9,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-JSON="${1:?usage: chapter-to-feishu.sh <chapter.json>}"
+JSON="${1:?usage: ./scripts/chapter-to-feishu.sh <chapter.json>}"
 
 if [ ! -f "$JSON" ]; then
   echo "chapter.json not found: $JSON" >&2
@@ -30,6 +30,6 @@ python3 "${SCRIPT_DIR}/chapter_parse.py" "$JSON" "${WORKDIR}/正文.md" "${WORKD
 
 # 2. 生成飞书文档（复用通用脚本）
 bash "${SCRIPT_DIR}/write-custom-doc.sh" \
-  "生财·游戏站手册 - ${TITLE}" \
-  "${WORKDIR}/正文.md" \
-  "${WORKDIR}/img"
+  --title "生财·游戏站手册 - ${TITLE}" \
+  --content "${WORKDIR}/正文.md" \
+  --image-dir "${WORKDIR}/img"

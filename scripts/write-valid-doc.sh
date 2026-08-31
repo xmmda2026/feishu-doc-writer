@@ -1,26 +1,78 @@
 #!/usr/bin/env bash
 # 稳定的飞书文档写入脚本 - 两阶段提交 + checkpoint 恢复
-# Usage: ./write-valid-doc.sh <result_file> [checkpoint_file]
+# Usage: ./scripts/write-valid-doc.sh --input RESULT_FILE [--checkpoint CHECKPOINT_FILE] [--candidate-info CANDIDATE_INFO_FILE] [--judgment JUDGMENT_FILE] [--keyword-screenshots KEYWORD_SCREENSHOT_FILE] [--resume-phase2]
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/lib/feishu-api.sh"
-source "${SCRIPT_DIR}/lib/checkpoint.sh"
+SKILL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+usage() {
+  echo "usage: ./scripts/write-valid-doc.sh --input RESULT_FILE [--checkpoint CHECKPOINT_FILE] [--candidate-info CANDIDATE_INFO_FILE] [--judgment JUDGMENT_FILE] [--keyword-screenshots KEYWORD_SCREENSHOT_FILE] [--resume-phase2]" >&2
+}
+
+fail_usage() {
+  echo "ERROR: $*" >&2
+  usage
+  exit 2
+}
+
+RESULT_FILE=""
+CHECKPOINT_FILE=""
+CANDIDATE_INFO_FILE=""
+JUDGMENT_FILE=""
+KEYWORD_SCREENSHOT_FILE=""
+
+RESUME_PHASE2=false
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --input)
+      [ "$#" -ge 2 ] || fail_usage "--input requires a value"
+      RESULT_FILE="$2"
+      shift 2
+      ;;
+    --checkpoint)
+      [ "$#" -ge 2 ] || fail_usage "--checkpoint requires a value"
+      CHECKPOINT_FILE="$2"
+      shift 2
+      ;;
+    --candidate-info)
+      [ "$#" -ge 2 ] || fail_usage "--candidate-info requires a value"
+      CANDIDATE_INFO_FILE="$2"
+      shift 2
+      ;;
+    --judgment)
+      [ "$#" -ge 2 ] || fail_usage "--judgment requires a value"
+      JUDGMENT_FILE="$2"
+      shift 2
+      ;;
+    --keyword-screenshots)
+      [ "$#" -ge 2 ] || fail_usage "--keyword-screenshots requires a value"
+      KEYWORD_SCREENSHOT_FILE="$2"
+      shift 2
+      ;;
+    --resume-phase2)
+      RESUME_PHASE2=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      fail_usage "unknown argument: $1"
+      ;;
+  esac
+done
+
+[ -n "${RESULT_FILE}" ] || fail_usage "--input is required"
+
+[ -f "${SKILL_DIR}/.env" ] && { set -a; source "${SKILL_DIR}/.env"; set +a; }
+source "${SCRIPT_DIR}/feishu-api.sh"
+source "${SCRIPT_DIR}/checkpoint.sh"
 
 # 飞书文档访问域名必须使用租户专属域名，例如 your-tenant.feishu.cn。
 FEISHU_DOC_DOMAIN="${FEISHU_DOC_DOMAIN:?Set FEISHU_DOC_DOMAIN to your tenant document domain}"
-
-RESULT_FILE="${1:-}"
-CHECKPOINT_FILE="${2:-}"
-CANDIDATE_INFO_FILE="${3:-}"
-JUDGMENT_FILE="${4:-}"
-KEYWORD_SCREENSHOT_FILE="${5:-}"
-
-RESUME_PHASE2=false
-for arg in "$@"; do
-  [ "$arg" = "--resume-phase2" ] && RESUME_PHASE2=true
-done
 
 MAX_KEYWORDS_PER_BATCH=2
 MAX_CHARS_PER_BATCH=7000
@@ -771,7 +823,7 @@ process_single_doc() {
 
 main() {
   if [ -z "${RESULT_FILE}" ]; then
-    json_error "usage: ./write-valid-doc.sh <result_file> [checkpoint_file] [candidate_info_file] [judgment_file]"
+    json_error "usage: ./scripts/write-valid-doc.sh --input RESULT_FILE [--checkpoint CHECKPOINT_FILE] [--candidate-info CANDIDATE_INFO_FILE] [--judgment JUDGMENT_FILE] [--keyword-screenshots KEYWORD_SCREENSHOT_FILE] [--resume-phase2]"
   fi
 
   if [ ! -f "${RESULT_FILE}" ]; then

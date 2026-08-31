@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """把生财 getChapterContent API 的 chapter JSON 解析成 markdown 正文 + 下载图片。
 
-Usage: chapter_parse.py <chapter.json> <out_md> <img_dir>
+Usage: ./scripts/chapter_parse.py <chapter.json> <out_md> <img_dir>
 
 - 遍历 data.content blocks，按 block_type 转成 markdown 行
 - image (27) 用 file_url 下载到 img_dir（retry 3 次规避 OSS QPS 限流），转 PNG，正文放 [[img-NN]] 占位符
