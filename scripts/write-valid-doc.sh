@@ -218,6 +218,60 @@ get_keyword_last_day_sort_value() {
   echo "$value"
 }
 
+read_keyword_screenshots_json() {
+  if [ -n "$KEYWORD_SCREENSHOT_FILE" ] && [ -f "$KEYWORD_SCREENSHOT_FILE" ]; then
+    local parsed
+    parsed=$(jq -c '.' "$KEYWORD_SCREENSHOT_FILE" 2>/dev/null || true)
+    if [ -n "$parsed" ]; then
+      echo "$parsed"
+      return 0
+    fi
+    tail -1 "$KEYWORD_SCREENSHOT_FILE"
+    return 0
+  fi
+  echo "{}"
+}
+
+get_keyword_screenshot_path() {
+  local slug="$1"
+  local screenshots_json="$2"
+  if [ -z "$screenshots_json" ]; then
+    echo ""
+    return 0
+  fi
+  echo "$screenshots_json" | jq -r --arg slug "$slug" '.screenshots[$slug] // empty' 2>/dev/null || true
+}
+
+get_result_screenshot_path() {
+  local result_json="$1"
+  local img_type="$2"
+  echo "$result_json" | jq -r --arg t "$img_type" '(.screenshots[$t] | if type == "object" then .local_path else . end) // empty' 2>/dev/null || true
+}
+
+count_expected_images_for_keyword() {
+  local keyword="$1"
+  local screenshots_json="$2"
+  local result_json slug count path
+  result_json=$(jq -c --arg kw "$keyword" '.results[] | select(.keyword == $kw)' "$RESULT_FILE")
+  [ -z "$result_json" ] && echo 0 && return 0
+  slug=$(sanitize_keyword_slug "$keyword")
+  count=0
+
+  path=$(get_result_screenshot_path "$result_json" "trends")
+  [ -n "$path" ] && [ -f "$path" ] && count=$((count + 1))
+
+  path=$(get_keyword_screenshot_path "$slug" "$screenshots_json")
+  [ -n "$path" ] && [ -f "$path" ] && count=$((count + 1))
+
+  path=$(get_result_screenshot_path "$result_json" "search")
+  [ -n "$path" ] && [ -f "$path" ] && count=$((count + 1))
+
+  path=$(get_result_screenshot_path "$result_json" "wiki")
+  [ -n "$path" ] && [ -f "$path" ] && count=$((count + 1))
+
+  echo "$count"
+}
+
 sort_keywords_by_recommendation_and_last_day() {
   local keywords=("$@")
   local entries=()
@@ -303,6 +357,8 @@ for line in sys.stdin:
 
   local kd_display
   kd_display="未获取"
+  local keyword_screenshots_json
+  keyword_screenshots_json="$(read_keyword_screenshots_json)"
   if [ -n "$KEYWORD_SCREENSHOT_FILE" ] && [ -f "$KEYWORD_SCREENSHOT_FILE" ]; then
     local kd_val
     # 先尝试整文件解析（兼容多行 pretty-print JSON），失败再 fallback 到 tail -1（混有日志行的文件）
@@ -311,6 +367,9 @@ for line in sys.stdin:
              true)
     [ -n "$kd_val" ] && [ "$kd_val" != "null" ] && kd_display="$kd_val"
   fi
+
+  local valid_gate_display
+  valid_gate_display=$(echo "$result_json" | jq -r '.valid_precheck_status // .decision // .status // "未知"')
 
   # 从候选词信息文件查找结构化数据
   local is_roblox_display="未知" recommendation_display="未知" release_date_display="未知" trend_reason_display="未知" topic_type_display="未知"
@@ -343,6 +402,34 @@ for line in sys.stdin:
     trend_meta=$'\n- 趋势原因：'"${trend_reason_display}"$'\n- 趋势词类型：'"${topic_type_display}"
   fi
 
+  local trends_img keyword_img search_img wiki_img
+  trends_img=$(get_result_screenshot_path "$result_json" "trends")
+  keyword_img=$(get_keyword_screenshot_path "$slug" "$keyword_screenshots_json")
+  search_img=$(get_result_screenshot_path "$result_json" "search")
+  wiki_img=$(get_result_screenshot_path "$result_json" "wiki")
+
+  local trends_block keyword_block search_block wiki_block
+  if [ -n "$trends_img" ] && [ -f "$trends_img" ]; then
+    trends_block=$'#### 4) 图片 - Trends\n\n'"[[IMG_TRENDS_${slug}]]"
+  else
+    trends_block=$'#### 4) 图片 - Trends\n\n截图缺失：本轮未生成或文件不存在，未上传占位图。'
+  fi
+  if [ -n "$keyword_img" ] && [ -f "$keyword_img" ]; then
+    keyword_block=$'#### 5) 图片 - SEO关键词工具\n\n'"[[IMG_KEYWORD_${slug}]]"
+  else
+    keyword_block=$'#### 5) 图片 - SEO关键词工具\n\n截图缺失：本轮未生成或文件不存在，未上传占位图。'
+  fi
+  if [ -n "$search_img" ] && [ -f "$search_img" ]; then
+    search_block=$'#### 6) 图片 - Search\n\n'"[[IMG_SEARCH_${slug}]]"
+  else
+    search_block=$'#### 6) 图片 - Search\n\n截图缺失：当前流程尚未生成普通 Google Search 截图，未上传占位图。'
+  fi
+  if [ -n "$wiki_img" ] && [ -f "$wiki_img" ]; then
+    wiki_block=$'#### 7) 图片 - Wiki\n\n'"[[IMG_WIKI_${slug}]]"
+  else
+    wiki_block=$'#### 7) 图片 - Wiki\n\n截图缺失：本轮未生成或文件不存在，未上传占位图。'
+  fi
+
   cat <<EOF
 ### ${keyword}
 
@@ -355,27 +442,20 @@ ${domains}
 - 推荐度：${recommendation_display}${trend_meta}
 - 一周内视频数量：${video_count_display}
 - KD：${kd_display}
+- valid前置门槛状态：${valid_gate_display}
 
 #### 3) 链接信息
 - Trends URL: ${trends_url}
 - Search URL: ${search_url}
 - Wiki URL: ${wiki_url}
 
-#### 4) 图片 - Trends
+${trends_block}
 
-[[IMG_TRENDS_${slug}]]
+${keyword_block}
 
-#### 5) 图片 - SEO关键词工具
+${search_block}
 
-[[IMG_KEYWORD_${slug}]]
-
-#### 6) 图片 - Search
-
-[[IMG_SEARCH_${slug}]]
-
-#### 7) 图片 - Wiki
-
-[[IMG_WIKI_${slug}]]
+${wiki_block}
 
 ---
 
@@ -454,7 +534,8 @@ process_single_doc() {
   local filter_keywords=("$@")
 
   local total_keywords=${#filter_keywords[@]}
-  local total_images=$((total_keywords * 4))
+  local keyword_screenshots_json
+  keyword_screenshots_json="$(read_keyword_screenshots_json)"
 
   # 排除中文词
   local unique_keywords=0 skipped_cjk=0
@@ -465,7 +546,15 @@ process_single_doc() {
       unique_keywords=$((unique_keywords + 1))
     fi
   done
-  local unique_images=$((unique_keywords * 4))
+  local total_images=0 unique_images=0
+  for kw in "${filter_keywords[@]}"; do
+    local kw_images
+    kw_images=$(count_expected_images_for_keyword "$kw" "$keyword_screenshots_json")
+    total_images=$((total_images + kw_images))
+    if [ "$(is_cjk_keyword "$kw")" != "yes" ]; then
+      unique_images=$((unique_images + kw_images))
+    fi
+  done
   if [ "$skipped_cjk" -gt 0 ]; then
     log "[$title_suffix] Filtered $skipped_cjk CJK keywords, effective unique: $unique_keywords"
   fi
@@ -850,7 +939,7 @@ main() {
   local roblox_keywords=() non_roblox_keywords=()
   local can_split=false
 
-  if [ -n "$CANDIDATE_INFO_FILE" ] && [ -f "$CANDIDATE_INFO_FILE" ]; then
+  if [ "${FEISHU_VALID_DISABLE_ROBLOX_SPLIT:-0}" != "1" ] && [ -n "$CANDIDATE_INFO_FILE" ] && [ -f "$CANDIDATE_INFO_FILE" ]; then
     can_split=true
     for kw in "${all_keywords[@]}"; do
       if [ "$(is_keyword_roblox "$kw")" = "true" ]; then
